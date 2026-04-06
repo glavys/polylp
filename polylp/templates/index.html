@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Polymarket LP Rewards Scanner</title>
+{% if params.refresh %}<meta http-equiv="refresh" content="{{ params.refresh }}">{% endif %}
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background:#0f1115; color:#e6e6e6; margin:0; padding:24px; }
+  h1 { margin:0 0 4px 0; font-size:18px; }
+  .sub { color:#8a8f98; font-size:12px; margin-bottom:16px; }
+  form { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; padding:12px; background:#161a22; border:1px solid #232a36; border-radius:8px; }
+  form label { display:flex; flex-direction:column; font-size:11px; color:#8a8f98; }
+  form input, form select { background:#0f1115; color:#e6e6e6; border:1px solid #2a3140; border-radius:4px; padding:6px 8px; font-family:inherit; font-size:12px; width:110px; }
+  form button { background:#2d7ef7; color:white; border:0; border-radius:4px; padding:0 14px; font-weight:600; cursor:pointer; align-self:flex-end; height:28px; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #1f2430; vertical-align:top; }
+  th { color:#8a8f98; font-weight:500; text-transform:uppercase; font-size:10px; letter-spacing:0.5px; background:#161a22; position:sticky; top:0; }
+  th a { color:inherit; text-decoration:none; display:block; }
+  th a:hover { color:#2d7ef7; }
+  th.active { color:#e6e6e6; }
+  th .arrow { opacity:0.7; font-size:9px; margin-left:2px; }
+  tr:hover { background:#161a22; }
+  .num { text-align:right; font-variant-numeric: tabular-nums; }
+  .rate { color:#6ee17a; font-weight:600; }
+  .q { max-width:420px; }
+  .q a { color:#e6e6e6; text-decoration:none; }
+  .q a:hover { color:#2d7ef7; text-decoration:underline; }
+  .h { color:#f5c06b; }
+  .score { color:#c39cff; }
+  .low { color:#8a8f98; }
+</style>
+</head>
+<body>
+<h1>Polymarket LP Rewards Scanner</h1>
+<div class="sub">{{ shown }} / {{ total }} markets · auto-refresh every {{ params.refresh }}s · sorted by <b>{{ params.sort }}{% if params.dir %} ({{ params.dir }}){% endif %}</b></div>
+
+<form method="get">
+  <label>min hours<input type="number" step="0.5" name="min_hours" value="{{ params.min_hours }}"></label>
+  <label>max hours<input type="number" step="0.5" name="max_hours" value="{{ params.max_hours }}"></label>
+  <label>min $/day<input type="number" step="1" name="min_rewards" value="{{ params.min_rewards }}"></label>
+  <label>max $/day<input type="number" step="1" name="max_rewards" value="{{ params.max_rewards }}"></label>
+  <label>max liquidity<input type="number" step="100" name="max_liquidity" value="{{ params.max_liquidity }}"></label>
+  <label>max volume<input type="number" step="100" name="max_volume" value="{{ params.max_volume }}"></label>
+  <label>max min size<input type="number" step="10" name="max_min_size" value="{{ params.max_min_size }}"></label>
+  <label>limit<input type="number" name="limit" value="{{ params.limit }}"></label>
+  <label>refresh sec<input type="number" name="refresh" value="{{ params.refresh }}"></label>
+  <input type="hidden" name="sort" value="{{ params.sort }}">
+  <input type="hidden" name="dir" value="{{ params.dir }}">
+  <button type="submit">Apply</button>
+</form>
+
+{% macro sort_link(col, label, default_desc=True) -%}
+  {%- set is_active = params.sort == col -%}
+  {%- set cur_dir = params.dir if params.dir else ('desc' if default_desc else 'asc') -%}
+  {%- set next_dir = 'asc' if (is_active and cur_dir == 'desc') else ('desc' if (is_active and cur_dir == 'asc') else ('desc' if default_desc else 'asc')) -%}
+  {%- set qs = 'sort=' ~ col ~ '&dir=' ~ next_dir ~
+               '&min_hours=' ~ params.min_hours ~
+               '&max_hours=' ~ params.max_hours ~
+               '&min_rewards=' ~ params.min_rewards ~
+               '&max_rewards=' ~ params.max_rewards ~
+               '&max_liquidity=' ~ params.max_liquidity ~
+               '&max_volume=' ~ params.max_volume ~
+               '&max_min_size=' ~ params.max_min_size ~
+               '&limit=' ~ params.limit ~
+               '&refresh=' ~ params.refresh -%}
+  <a href="?{{ qs }}">{{ label }}{% if is_active %}<span class="arrow">{{ '▼' if cur_dir=='desc' else '▲' }}</span>{% endif %}</a>
+{%- endmacro %}
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>Market</th>
+      <th class="num {% if params.sort=='hours' %}active{% endif %}">{{ sort_link('hours','Until', false) }}</th>
+      <th class="num {% if params.sort=='rate' %}active{% endif %}">{{ sort_link('rate','$/day pool', true) }}</th>
+      <th class="num {% if params.sort=='liquidity' %}active{% endif %}">{{ sort_link('liquidity','Liq in spread', false) }}</th>
+      <th class="num {% if params.sort=='volume' %}active{% endif %}">{{ sort_link('volume','Volume', false) }}</th>
+      <th class="num {% if params.sort=='spread' %}active{% endif %}">{{ sort_link('spread','Spread', true) }}</th>
+      <th class="num {% if params.sort=='min_size' %}active{% endif %}">{{ sort_link('min_size','Capital', false) }}</th>
+      <th class="num {% if params.sort=='expected' %}active{% endif %}">{{ sort_link('expected','Exp $/day', true) }}</th>
+      <th class="num {% if params.sort=='apr' %}active{% endif %}">{{ sort_link('apr','APR', true) }}</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for m in markets %}
+    <tr>
+      <td class="low">{{ loop.index }}</td>
+      <td class="q"><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.question }}</a></td>
+      <td class="num h">
+        {% if m.hours_until_start is none %}—
+        {% elif m.hours_until_start < 0 %}<span class="low">started</span>
+        {% else %}
+          {% set h = m.hours_until_start %}
+          {% if h >= 24 %}{{ '%.1f'|format(h/24) }}d{% else %}{{ '%.1f'|format(h) }}h{% endif %}
+        {% endif %}
+      </td>
+      <td class="num rate">${{ '%.0f'|format(m.rate_per_day) }}</td>
+      <td class="num {% if m.liquidity_in_spread is none %}low{% endif %}" title="{% if m.liquidity_in_spread is none %}gamma total liquidity (book not fetched){% else %}CLOB in-spread shares{% endif %}">
+        {{ '{:,.0f}'.format(m.effective_liquidity) }}{% if m.liquidity_in_spread is none %}*{% endif %}
+      </td>
+      <td class="num">${{ '{:,.0f}'.format(m.volume) }}</td>
+      <td class="num low">{{ '%.1f'|format(m.rewards_max_spread) }}¢</td>
+      <td class="num low">{{ '%.0f'|format(m.rewards_min_size) }}</td>
+      <td class="num rate">${{ '%.2f'|format(m.expected_daily) }}</td>
+      <td class="num score">{{ '{:,.0f}'.format(m.apr * 100) }}%</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<div class="sub" style="margin-top:12px">* = liquidity not yet enriched from CLOB book (showing gamma total); APR = rate × 365 / (in-spread liquidity + your capital)</div>
+</body>
+</html>
